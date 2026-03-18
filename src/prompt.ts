@@ -1,4 +1,4 @@
-import type { RoundRecord, RunState, StartRequest } from './types.js';
+import type { PolicyMode, RoundRecord, RunState, StartRequest } from './types.js';
 
 function bulletList(values: string[]): string {
   if (values.length === 0) {
@@ -21,7 +21,53 @@ function summarizeCommands(round: RoundRecord | undefined): string {
     .join('\n');
 }
 
-export function buildInitialPrompt(spec: StartRequest): string {
+function buildAllowedCommandsSection(spec: StartRequest, policyMode: PolicyMode): string[] {
+  if (policyMode === 'off') {
+    return [
+      'Bridge policy mode:',
+      '- off (full access)',
+      '',
+      'Allowed shell command basenames from the supervisor:',
+      bulletList(spec.allowed_commands),
+      '',
+      'These allowed_commands are advisory metadata only in full-access mode. They are not enforced by the bridge and should not block necessary work.',
+    ];
+  }
+
+  return [
+    'Bridge policy mode:',
+    `- ${policyMode}`,
+    '',
+    'Allowed shell command basenames:',
+    bulletList(spec.allowed_commands),
+  ];
+}
+
+function buildExecutionContract(policyMode: PolicyMode): string[] {
+  const lines = [
+    'Execution contract:',
+    '- Do the work directly in the repository.',
+    '- Stay inside the target repository rooted at the workspace path above.',
+    '- Do not inspect or rely on bootstrap, memory, or session files outside the target repository.',
+    '- Do not create commits, amend commits, or switch branches.',
+  ];
+
+  if (policyMode === 'off') {
+    lines.push('- Bridge policy mode is off. Use whatever non-destructive shell commands are needed to complete the task safely.');
+    lines.push('- The allowed_commands list is advisory in this mode. Do not stop only because a needed command is absent from that list.');
+  } else if (policyMode === 'warn') {
+    lines.push('- Prefer to stay within the allowed_commands list when practical. The bridge will audit commands but will not interrupt the round.');
+    lines.push('- If you use a command outside the allowed list, mention it briefly in the final summary.');
+  } else {
+    lines.push('- If you need a command outside the allowed list, stop and state that explicitly instead of using it.');
+  }
+
+  lines.push('- Before finishing this round, provide a concise summary of what changed, what remains, and what verification ran.');
+  lines.push('- If you need a human or supervisor decision, ask the question explicitly in the final message.');
+  return lines;
+}
+
+export function buildInitialPrompt(spec: StartRequest, policyMode: PolicyMode): string {
   return [
     'You are working as a non-interactive worker for a bridge daemon.',
     `Workspace root: ${spec.cwd}`,
@@ -32,24 +78,20 @@ export function buildInitialPrompt(spec: StartRequest): string {
     'Acceptance criteria:',
     bulletList(spec.acceptance),
     '',
-    'Allowed shell command basenames:',
-    bulletList(spec.allowed_commands),
+    ...buildAllowedCommandsSection(spec, policyMode),
     '',
     'Stop conditions:',
     bulletList(spec.stop_conditions),
     '',
-    'Execution contract:',
-    '- Do the work directly in the repository.',
-    '- Stay inside the target repository rooted at the workspace path above.',
-    '- Do not inspect or rely on bootstrap, memory, or session files outside the target repository.',
-    '- Do not create commits, amend commits, or switch branches.',
-    '- If you need a command outside the allowed list, stop and state that explicitly instead of using it.',
-    '- Before finishing this round, provide a concise summary of what changed, what remains, and what verification ran.',
-    '- If you need a human or supervisor decision, ask the question explicitly in the final message.',
+    ...buildExecutionContract(policyMode),
   ].join('\n');
 }
 
-export function buildContinuationPrompt(spec: StartRequest, state: RunState): string {
+export function buildContinuationPrompt(
+  spec: StartRequest,
+  state: RunState,
+  policyMode: PolicyMode,
+): string {
   const lastRound = state.rounds.at(-1);
   const unfinishedItems =
     lastRound?.open_items.length && lastRound.open_items.length > 0
@@ -66,8 +108,7 @@ export function buildContinuationPrompt(spec: StartRequest, state: RunState): st
     'Acceptance criteria:',
     bulletList(spec.acceptance),
     '',
-    'Allowed shell command basenames:',
-    bulletList(spec.allowed_commands),
+    ...buildAllowedCommandsSection(spec, policyMode),
     '',
     'Stop conditions:',
     bulletList(spec.stop_conditions),
@@ -90,6 +131,11 @@ export function buildContinuationPrompt(spec: StartRequest, state: RunState): st
     '- Continue from the current working tree instead of redoing prior analysis.',
     '- Stay inside the target repository and ignore external bootstrap or memory conventions.',
     '- Do not create commits, amend commits, or switch branches.',
+    ...(policyMode === 'off'
+      ? ['- Full-access mode is enabled. Use the commands you need to finish the task safely instead of treating allowed_commands as a hard limit.']
+      : policyMode === 'warn'
+        ? ['- Prefer the allowed_commands list when practical, but the bridge will only audit and warn in this mode.']
+        : ['- Treat allowed_commands as a hard limit in this mode.']),
     '- If code is still incomplete, finish it first.',
     '- Run at least one key verification command successfully before claiming completion.',
     '- If you are done, give a concise closing summary that states changed files and verification results.',

@@ -378,7 +378,7 @@ export class BridgeDaemon {
       policy_mode: this.policy_mode,
     });
 
-    await this.launchRound(run, buildInitialPrompt(spec));
+    await this.launchRound(run, buildInitialPrompt(spec, this.policy_mode));
     return {
       run_id,
       query: this.queryRun(run_id),
@@ -395,7 +395,7 @@ export class BridgeDaemon {
       throw new Error(`run is not waiting: ${run.state.status}`);
     }
 
-    await this.launchRound(run, buildContinuationPrompt(run.spec, run.state));
+    await this.launchRound(run, buildContinuationPrompt(run.spec, run.state, this.policy_mode));
     return {
       run_id: runId,
       query: this.queryRun(runId),
