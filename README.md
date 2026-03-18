@@ -51,6 +51,17 @@ That is intentional for trusted local development, but it means:
 - do not point it at sensitive directories unless you accept that the worker can operate there
 - do not expose this daemon beyond `localhost`
 
+Examples of what full-access mode can do if the worker decides to:
+
+- delete files or directories
+- overwrite large parts of a repository
+- rename or move files in bulk
+- run destructive shell commands inside the target repository
+- modify generated assets, local databases, or logs
+- leave the worktree broken or half-edited if a run fails midway
+
+If you care about safety, use a disposable clone, a throwaway branch, or a repo snapshot before testing full-access runs.
+
 ## MVP Scope
 
 - Single local daemon on `localhost`
@@ -101,6 +112,14 @@ In `off` mode:
 - You still get structured events, state snapshots, interrupt/finalize controls, and diff/test summaries
 
 This is the recommended mode for trusted local development when you want Codex to actually write code and run the commands it needs.
+
+It is not safe for:
+
+- production servers
+- home directories
+- secrets folders
+- shared multi-user machines
+- any repository where accidental deletion or mass edits would be expensive
 
 ## Control Plane
 
@@ -213,6 +232,7 @@ The smoke test starts the daemon, runs a toy repo task through `start/query/cont
 - Round-based execution only; no long-lived shared worker session
 - Completion is still heuristic and depends on worker summaries plus diff/test signals
 - Upstream Codex failures such as auth issues, invalid API keys, quota exhaustion, or usage limits are surfaced by the bridge, but they are not fixed by the bridge
+- `policy_mode=off` is intentionally powerful and can damage a repository if used carelessly
 
 ## Recommended Use
 
@@ -224,3 +244,11 @@ Use this project when you want:
 - an explicit choice between audited mode and full-access mode
 
 Use `policy_mode=off` only when the repository and environment are trusted.
+
+## Safety Recommendations
+
+- Prefer testing on a disposable clone first
+- Keep backups or a clean git remote before full-access runs
+- Avoid pointing `cwd` at directories that contain secrets or unrelated personal files
+- Do not assume the bridge will stop destructive commands for you in `off` mode
+- If you need stronger safety, use `warn` or `enforce` instead of `off`

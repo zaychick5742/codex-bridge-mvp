@@ -40,6 +40,25 @@ npm run daemon
 - `enforce`
   The bridge treats `allowed_commands[]` as a hard policy and blocks on violations.
 
+## Security And Safety Warning
+
+`policy_mode=off` is not a sandboxed mode.
+
+In that mode the worker may run commands that:
+
+- delete files or directories
+- overwrite source code
+- rewrite local databases or generated assets
+- leave a repository half-modified if the run fails
+
+That means:
+
+- do not use `off` mode against sensitive directories
+- do not use it on machines or paths you would not trust with a full local coding agent
+- do not assume the bridge will prevent dangerous shell behavior
+
+If you want a safer starting point, use `warn` or `enforce`.
+
 ## Start Payload
 
 `POST /start` expects:
