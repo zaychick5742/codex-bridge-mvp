@@ -11,6 +11,12 @@ It is designed for a supervisor such as `openclaw` to:
 
 The bridge owns worker lifecycle, event normalization, run state, diff snapshots, verification snapshots, and supervisor-facing status transitions. The supervisor does not need AppleScript, TTY injection, or screen reading.
 
+## Docs
+
+- [Installation](./INSTALL.md)
+- [Configuration](./CONFIGURATION.md)
+- [Publishing](./PUBLISHING.md)
+
 ## What This Project Is
 
 - A local daemon on `localhost`
