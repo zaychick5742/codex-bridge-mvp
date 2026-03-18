@@ -1,0 +1,19 @@
+{
+  "name": "codex-bridge-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "codex-bridge-mvp": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "daemon": "node dist/cli.js daemon",
+    "smoke": "npm run build && node dist/cli.js smoke",
+    "start": "npm run daemon"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "typescript": "^5.9.3"
+  }
+}
