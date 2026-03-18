@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { BridgeDaemon } from './daemon.js';
 import { runSmoke } from './smoke.js';
+import type { PolicyMode } from './types.js';
 
 function parseOption(name: string, defaultValue: string): string {
   const flag = `--${name}`;
@@ -13,18 +14,26 @@ function parseOption(name: string, defaultValue: string): string {
   return defaultValue;
 }
 
+function parsePolicyMode(rawValue: string): PolicyMode {
+  if (rawValue === 'off' || rawValue === 'warn' || rawValue === 'enforce') {
+    return rawValue;
+  }
+  throw new Error(`invalid policy mode: ${rawValue}`);
+}
+
 async function main(): Promise<void> {
   const __filename = fileURLToPath(import.meta.url);
   const projectRoot = resolve(dirname(__filename), '..');
   const command = process.argv[2] ?? 'daemon';
   const host = parseOption('host', '127.0.0.1');
   const port = Number.parseInt(parseOption('port', '4545'), 10);
+  const policyMode = parsePolicyMode(parseOption('policy-mode', process.env.BRIDGE_POLICY_MODE ?? 'warn'));
 
   if (command === 'daemon') {
-    const daemon = new BridgeDaemon({ root_dir: projectRoot, host, port });
+    const daemon = new BridgeDaemon({ root_dir: projectRoot, host, port, policy_mode: policyMode });
     await daemon.init();
     await daemon.listen();
-    process.stdout.write(`bridge daemon listening on http://${host}:${port}\n`);
+    process.stdout.write(`bridge daemon listening on http://${host}:${port} (policy_mode=${policyMode})\n`);
 
     const shutdown = async () => {
       await daemon.close();

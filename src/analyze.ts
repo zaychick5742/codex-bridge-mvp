@@ -124,6 +124,14 @@ function mentionsUnfinishedWork(text: string): boolean {
     return true;
   }
 
+  if (
+    /\b(no remaining work|nothing remaining|no obvious unfinished work|nothing left to do|no unfinished work|no work remains|remaining: nothing|what remains: nothing|acceptance criteria are met|acceptance criteria are satisfied)\b/.test(
+      normalized,
+    )
+  ) {
+    return false;
+  }
+
   return /\b(todo|remaining|still need|next step|left to|unfinished|could not|unable to|blocked|not yet)\b/.test(
     normalized,
   );
@@ -251,6 +259,21 @@ export function evaluateAfterRound(
       stall_count: stallCount,
       last_error: round.worker_exit_code === null ? 'worker_start_failed' : `worker_exit_${round.worker_exit_code}`,
       open_items: dedupe([...openItems, 'Worker process failed before a normal round completion.']),
+      progress,
+      force_continue_reason: forcedContinue,
+    };
+  }
+
+  if (round.worker_exit_code !== null && round.worker_exit_code !== 0) {
+    return {
+      status: 'blocked',
+      judgement: 'blocked',
+      stall_count: stallCount,
+      last_error: `worker_exit_${round.worker_exit_code}`,
+      open_items: dedupe([
+        ...openItems,
+        `Worker exited with non-zero code ${round.worker_exit_code}.`,
+      ]),
       progress,
       force_continue_reason: forcedContinue,
     };

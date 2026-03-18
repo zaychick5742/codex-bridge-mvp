@@ -23,6 +23,18 @@ npm run daemon
 
 The foreground daemon listens on `http://127.0.0.1:4545` by default.
 
+Policy mode is daemon-level and defaults to `warn`.
+
+```bash
+npm run daemon -- --policy-mode warn
+npm run daemon -- --policy-mode off
+npm run daemon -- --policy-mode enforce
+```
+
+- `off`: full-access worker execution, no `allowed_commands` enforcement, logs still flow normally
+- `warn`: audit `allowed_commands` but never kill the worker mid-round
+- `enforce`: block immediately on out-of-policy commands
+
 ## Control Plane
 
 Example `start` call:
@@ -88,7 +100,8 @@ Each run persists to `.bridge-state/<run_id>/`:
 - The worker edits the repository directly.
 - The worker should not create commits, amend commits, or switch branches.
 - `allowed_commands[]` is treated as a task contract in the prompt and audited after the fact from command events.
-- Policy violations immediately block the run.
+- In `warn` mode, policy mismatches are recorded but do not block the run.
+- In `enforce` mode, policy violations immediately block the run.
 
 ## Validation
 

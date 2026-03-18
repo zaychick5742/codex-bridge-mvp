@@ -1,4 +1,5 @@
 export type BridgeStatus = 'running' | 'waiting' | 'needs_guidance' | 'blocked' | 'done';
+export type PolicyMode = 'off' | 'warn' | 'enforce';
 
 export type BridgeJudgement =
   | 'working'
@@ -72,6 +73,7 @@ export interface RoundRecord {
   progress: boolean;
   open_items: string[];
   policy_violation: string | null;
+  policy_warnings: string[];
   force_continue_reason: string | null;
 }
 
@@ -87,6 +89,7 @@ export interface RunState {
   round: number;
   stall_count: number;
   last_error: string | null;
+  policy_mode: PolicyMode;
   finalized: boolean;
   finalized_at: string | null;
   thread_id: string | null;

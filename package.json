@@ -10,7 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "daemon": "node dist/cli.js daemon",
     "smoke": "npm run build && node dist/cli.js smoke",
-    "unit": "npm run build && node --test dist/shell.test.js",
+    "unit": "npm run build && node --test dist/*.test.js",
     "start": "npm run daemon"
   },
   "devDependencies": {

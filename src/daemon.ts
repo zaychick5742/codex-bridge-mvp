@@ -18,6 +18,7 @@ import type {
   CommandExecutionRecord,
   LoadedRun,
   NormalizedEvent,
+  PolicyMode,
   QueryRequest,
   QueryResponse,
   RoundRecord,
@@ -45,6 +46,7 @@ interface ActiveProcess {
   interrupted: boolean;
   startup_failed: boolean;
   policy_violation: string | null;
+  policy_warnings: string[];
   stderr_lines: number;
   non_json_stdout_lines: number;
   last_message: string;
@@ -108,16 +110,19 @@ export class BridgeDaemon {
 
   private readonly port: number;
 
+  private readonly policy_mode: PolicyMode;
+
   private readonly runs = new Map<string, LoadedRun>();
 
   private readonly active_processes = new Map<string, ActiveProcess>();
 
   private server: Server | null = null;
 
-  constructor(options: { root_dir: string; host: string; port: number }) {
+  constructor(options: { root_dir: string; host: string; port: number; policy_mode: PolicyMode }) {
     this.root_dir = options.root_dir;
     this.host = options.host;
     this.port = options.port;
+    this.policy_mode = options.policy_mode;
     this.state_root = join(this.root_dir, '.bridge-state');
   }
 
@@ -252,6 +257,11 @@ export class BridgeDaemon {
         continue;
       }
 
+      state.policy_mode = state.policy_mode ?? this.policy_mode;
+      for (const round of state.rounds) {
+        round.policy_warnings = round.policy_warnings ?? [];
+      }
+
       if (state.status === 'running' && state.active_worker_pid) {
         try {
           process.kill(state.active_worker_pid, 0);
@@ -346,6 +356,7 @@ export class BridgeDaemon {
       round: 0,
       stall_count: 0,
       last_error: null,
+      policy_mode: this.policy_mode,
       finalized: false,
       finalized_at: null,
       thread_id: null,
@@ -364,6 +375,7 @@ export class BridgeDaemon {
       acceptance: spec.acceptance,
       allowed_commands: spec.allowed_commands,
       stop_conditions: spec.stop_conditions,
+      policy_mode: this.policy_mode,
     });
 
     await this.launchRound(run, buildInitialPrompt(spec));
@@ -442,6 +454,7 @@ export class BridgeDaemon {
       round: run.state.round,
       stall_count: run.state.stall_count,
       last_error: run.state.last_error,
+      policy_mode: run.state.policy_mode,
     };
 
     await writeJson(join(run.dir, 'final.json'), finalPayload);
@@ -479,6 +492,7 @@ export class BridgeDaemon {
       progress: false,
       open_items: [],
       policy_violation: null,
+      policy_warnings: [],
       force_continue_reason: null,
     };
 
@@ -504,6 +518,7 @@ export class BridgeDaemon {
     await this.appendEvent(run, roundNumber, 'worker.started', {
       pid: child.pid ?? null,
       cwd: run.spec.cwd,
+      policy_mode: this.policy_mode,
       argv: ['codex', 'exec', '--json', '--full-auto', '--cd', run.spec.cwd, '<prompt>'],
     });
 
@@ -527,6 +542,7 @@ export class BridgeDaemon {
       interrupted: false,
       startup_failed: false,
       policy_violation: null,
+      policy_warnings: [],
       stderr_lines: 0,
       non_json_stdout_lines: 0,
       last_message: '',
@@ -589,6 +605,7 @@ export class BridgeDaemon {
       latestRound.stderr_lines = active.stderr_lines;
       latestRound.non_json_stdout_lines = active.non_json_stdout_lines;
       latestRound.policy_violation = active.policy_violation;
+      latestRound.policy_warnings = [...active.policy_warnings];
       latestRound.commands = [...active.command_records.values()];
 
       const diffSnapshot = await captureDiffSnapshot(run.spec.cwd);
@@ -640,6 +657,7 @@ export class BridgeDaemon {
         ...buildQueryResponse(run.state),
         verification_status: latestRound.verification_status,
         open_items: latestRound.open_items,
+        policy_warnings: latestRound.policy_warnings,
       });
 
       this.active_processes.delete(run.state.run_id);
@@ -705,17 +723,36 @@ export class BridgeDaemon {
     const annotated = annotateCommand(merged);
     active.command_records.set(item.id, annotated);
 
+    if (this.policy_mode === 'off') {
+      return;
+    }
+
     const audit = auditCommandAgainstPolicy(annotated.command, run.spec.allowed_commands);
-    if (audit.violating.length > 0 && !active.policy_violation) {
-      active.policy_violation = `command(s) outside allowed_commands: ${audit.violating.join(', ')}`;
-      annotated.extracted_commands = audit.extracted;
-      active.command_records.set(item.id, annotated);
-      run.state.status = 'blocked';
-      run.state.judgement = 'blocked';
-      run.state.last_error = `blocked_policy: ${active.policy_violation}`;
-      run.state.summary = `Policy violation detected in round ${roundNumber}.`;
-      await this.persistRun(run);
-      active.child.kill('SIGTERM');
+    annotated.extracted_commands = audit.extracted;
+    active.command_records.set(item.id, annotated);
+
+    if (audit.violating.length > 0) {
+      const warning = `command(s) outside allowed_commands: ${audit.violating.join(', ')}`;
+      const firstSeen = !active.policy_warnings.includes(warning);
+      if (firstSeen) {
+        active.policy_warnings.push(warning);
+        await this.appendEvent(run, roundNumber, this.policy_mode === 'enforce' ? 'policy.violation' : 'policy.warning', {
+          mode: this.policy_mode,
+          command: annotated.command,
+          extracted: audit.extracted,
+          violating: audit.violating,
+        });
+      }
+
+      if (this.policy_mode === 'enforce' && !active.policy_violation) {
+        active.policy_violation = warning;
+        run.state.status = 'blocked';
+        run.state.judgement = 'blocked';
+        run.state.last_error = `blocked_policy: ${active.policy_violation}`;
+        run.state.summary = `Policy violation detected in round ${roundNumber}.`;
+        await this.persistRun(run);
+        active.child.kill('SIGTERM');
+      }
     }
   }
 
