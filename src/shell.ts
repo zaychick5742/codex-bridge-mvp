@@ -15,6 +15,41 @@ function trimOuterQuotes(value: string): string {
   return trimmed;
 }
 
+function unescapeDoubleQuotedShell(value: string): string {
+  let result = '';
+  let escaped = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+
+    if (!escaped) {
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+
+      result += char;
+      continue;
+    }
+
+    if (char === '"' || char === '\\' || char === '$' || char === '`') {
+      result += char;
+    } else if (char === '\n') {
+      result += '\n';
+    } else {
+      result += `\\${char}`;
+    }
+
+    escaped = false;
+  }
+
+  if (escaped) {
+    result += '\\';
+  }
+
+  return result;
+}
+
 function splitTopLevelShellSegments(input: string): string[] {
   const segments: string[] = [];
   let current = '';
@@ -165,7 +200,14 @@ function unwrapShellPayload(command: string): string {
   if (!match) {
     return command.trim();
   }
-  return trimOuterQuotes(match[1]);
+
+  const rawPayload = match[1].trim();
+  const quote = rawPayload[0];
+  const payload = trimOuterQuotes(rawPayload);
+  if (quote === '"') {
+    return unescapeDoubleQuotedShell(payload);
+  }
+  return payload;
 }
 
 function normalizeCommandName(token: string): string {
