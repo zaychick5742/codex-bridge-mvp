@@ -44,6 +44,12 @@ With explicit host, port, and full-access mode:
 node dist/cli.js daemon --host 127.0.0.1 --port 4545 --policy-mode off
 ```
 
+With full-access mode but `rm` hard-blocked:
+
+```bash
+node dist/cli.js daemon --host 127.0.0.1 --port 4545 --policy-mode off --deny-commands rm
+```
+
 ## Verify The Daemon
 
 In another terminal:

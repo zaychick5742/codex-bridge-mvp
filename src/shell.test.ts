@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 
 import { auditCommandAgainstPolicy, extractCommandNames } from './shell.js';
 
+test('extractCommandNames identifies rm in a shell payload', () => {
+  const command = "/bin/zsh -lc 'rm -rf tmp/cache'";
+  assert.deepEqual(extractCommandNames(command), ['rm']);
+});
+
+test('extractCommandNames identifies absolute-path rm invocations', () => {
+  const command = '/bin/zsh -lc "/bin/rm -rf tmp/cache"';
+  assert.deepEqual(extractCommandNames(command), ['rm']);
+});
+
 test('extractCommandNames keeps regex alternation inside quoted rg patterns', () => {
   const command = '/bin/zsh -lc "rg -n \\"real|quickstart|summary\\" README.md"';
   assert.deepEqual(extractCommandNames(command), ['rg']);

@@ -90,6 +90,7 @@ export interface RunState {
   stall_count: number;
   last_error: string | null;
   policy_mode: PolicyMode;
+  hard_denied_commands: string[];
   finalized: boolean;
   finalized_at: string | null;
   thread_id: string | null;

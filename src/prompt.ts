@@ -7,6 +7,19 @@ function bulletList(values: string[]): string {
   return values.map((value) => `- ${value}`).join('\n');
 }
 
+function buildHardDeniedCommandsSection(hardDeniedCommands: string[]): string[] {
+  if (hardDeniedCommands.length === 0) {
+    return [];
+  }
+
+  return [
+    'Bridge hard-denied shell command basenames:',
+    bulletList(hardDeniedCommands),
+    '',
+    'Never invoke these commands. The bridge will terminate the round if they appear, even in full-access mode.',
+  ];
+}
+
 function summarizeCommands(round: RoundRecord | undefined): string {
   if (!round || round.commands.length === 0) {
     return '- none';
@@ -21,7 +34,11 @@ function summarizeCommands(round: RoundRecord | undefined): string {
     .join('\n');
 }
 
-function buildAllowedCommandsSection(spec: StartRequest, policyMode: PolicyMode): string[] {
+function buildAllowedCommandsSection(
+  spec: StartRequest,
+  policyMode: PolicyMode,
+  hardDeniedCommands: string[],
+): string[] {
   if (policyMode === 'off') {
     return [
       'Bridge policy mode:',
@@ -31,6 +48,8 @@ function buildAllowedCommandsSection(spec: StartRequest, policyMode: PolicyMode)
       bulletList(spec.allowed_commands),
       '',
       'These allowed_commands are advisory metadata only in full-access mode. They are not enforced by the bridge and should not block necessary work.',
+      '',
+      ...buildHardDeniedCommandsSection(hardDeniedCommands),
     ];
   }
 
@@ -40,10 +59,12 @@ function buildAllowedCommandsSection(spec: StartRequest, policyMode: PolicyMode)
     '',
     'Allowed shell command basenames:',
     bulletList(spec.allowed_commands),
+    '',
+    ...buildHardDeniedCommandsSection(hardDeniedCommands),
   ];
 }
 
-function buildExecutionContract(policyMode: PolicyMode): string[] {
+function buildExecutionContract(policyMode: PolicyMode, hardDeniedCommands: string[]): string[] {
   const lines = [
     'Execution contract:',
     '- Do the work directly in the repository.',
@@ -62,12 +83,22 @@ function buildExecutionContract(policyMode: PolicyMode): string[] {
     lines.push('- If you need a command outside the allowed list, stop and state that explicitly instead of using it.');
   }
 
+  if (hardDeniedCommands.length > 0) {
+    lines.push(
+      `- Never invoke hard-denied commands in this environment: ${hardDeniedCommands.join(', ')}.`,
+    );
+  }
+
   lines.push('- Before finishing this round, provide a concise summary of what changed, what remains, and what verification ran.');
   lines.push('- If you need a human or supervisor decision, ask the question explicitly in the final message.');
   return lines;
 }
 
-export function buildInitialPrompt(spec: StartRequest, policyMode: PolicyMode): string {
+export function buildInitialPrompt(
+  spec: StartRequest,
+  policyMode: PolicyMode,
+  hardDeniedCommands: string[],
+): string {
   return [
     'You are working as a non-interactive worker for a bridge daemon.',
     `Workspace root: ${spec.cwd}`,
@@ -78,12 +109,12 @@ export function buildInitialPrompt(spec: StartRequest, policyMode: PolicyMode): 
     'Acceptance criteria:',
     bulletList(spec.acceptance),
     '',
-    ...buildAllowedCommandsSection(spec, policyMode),
+    ...buildAllowedCommandsSection(spec, policyMode, hardDeniedCommands),
     '',
     'Stop conditions:',
     bulletList(spec.stop_conditions),
     '',
-    ...buildExecutionContract(policyMode),
+    ...buildExecutionContract(policyMode, hardDeniedCommands),
   ].join('\n');
 }
 
@@ -91,6 +122,7 @@ export function buildContinuationPrompt(
   spec: StartRequest,
   state: RunState,
   policyMode: PolicyMode,
+  hardDeniedCommands: string[],
 ): string {
   const lastRound = state.rounds.at(-1);
   const unfinishedItems =
@@ -108,7 +140,7 @@ export function buildContinuationPrompt(
     'Acceptance criteria:',
     bulletList(spec.acceptance),
     '',
-    ...buildAllowedCommandsSection(spec, policyMode),
+    ...buildAllowedCommandsSection(spec, policyMode, hardDeniedCommands),
     '',
     'Stop conditions:',
     bulletList(spec.stop_conditions),
@@ -136,6 +168,9 @@ export function buildContinuationPrompt(
       : policyMode === 'warn'
         ? ['- Prefer the allowed_commands list when practical, but the bridge will only audit and warn in this mode.']
         : ['- Treat allowed_commands as a hard limit in this mode.']),
+    ...(hardDeniedCommands.length > 0
+      ? [`- Never invoke hard-denied commands in this environment: ${hardDeniedCommands.join(', ')}.`]
+      : []),
     '- If code is still incomplete, finish it first.',
     '- Run at least one key verification command successfully before claiming completion.',
     '- If you are done, give a concise closing summary that states changed files and verification results.',

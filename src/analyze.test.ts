@@ -47,6 +47,7 @@ function buildState(round: RoundRecord): RunState {
     stall_count: 0,
     last_error: null,
     policy_mode: 'warn',
+    hard_denied_commands: [],
     finalized: false,
     finalized_at: null,
     thread_id: null,

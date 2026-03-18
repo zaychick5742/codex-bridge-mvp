@@ -18,11 +18,14 @@ Available flags:
   Listen port. Default: `4545`
 - `--policy-mode`
   One of `off`, `warn`, `enforce`
+- `--deny-commands`
+  Comma-separated command basenames that are always blocked, even in `off`
 
 You can also set:
 
 ```bash
 BRIDGE_POLICY_MODE=off
+BRIDGE_DENY_COMMANDS=rm
 ```
 
 and then run:
@@ -39,6 +42,32 @@ npm run daemon
   The bridge records out-of-policy commands as warnings but does not terminate the round.
 - `enforce`
   The bridge treats `allowed_commands[]` as a hard policy and blocks on violations.
+
+## Hard-Denied Commands
+
+Use `--deny-commands` when you want one or more commands to stay forbidden across every policy mode.
+
+Example:
+
+```bash
+node dist/cli.js daemon --host 127.0.0.1 --port 4545 --policy-mode off --deny-commands rm
+```
+
+Or with environment variables:
+
+```bash
+BRIDGE_POLICY_MODE=off
+BRIDGE_DENY_COMMANDS=rm
+npm run daemon
+```
+
+Current behavior:
+
+- Hard-denied commands are blocked in `off`, `warn`, and `enforce`
+- The worker prompt is told not to use them
+- The bridge also prepends wrapper binaries to `PATH` for those basenames
+
+This is still not a sandbox. Blocking `rm` does not stop deletion through other tools such as Python, Node.js, Git, or custom scripts.
 
 ## Security And Safety Warning
 
@@ -112,6 +141,12 @@ For trusted local development:
 node dist/cli.js daemon --host 127.0.0.1 --port 4545 --policy-mode off
 ```
 
+For full access with `rm` blocked:
+
+```bash
+node dist/cli.js daemon --host 127.0.0.1 --port 4545 --policy-mode off --deny-commands rm
+```
+
 For audit without interruption:
 
 ```bash
@@ -129,3 +164,4 @@ node dist/cli.js daemon --host 127.0.0.1 --port 4545 --policy-mode enforce
 - If a run ends with `worker_exit_1`, check `stderr.log` and `events.jsonl` for upstream auth, quota, or API errors.
 - If `/health` fails, make sure the daemon is running and the selected port is free.
 - If the worker appears too restricted, make sure you are not accidentally running in `enforce` mode.
+- If you expected `rm` to work and it does not, check whether `--deny-commands` or `BRIDGE_DENY_COMMANDS` is set.

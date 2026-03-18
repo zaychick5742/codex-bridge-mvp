@@ -50,6 +50,7 @@ That is intentional for trusted local development, but it means:
 - do not treat the bridge as a sandbox
 - do not point it at sensitive directories unless you accept that the worker can operate there
 - do not expose this daemon beyond `localhost`
+- if you need a hard red line even in full-access mode, use a daemon deny list such as `--deny-commands rm`
 
 Examples of what full-access mode can do if the worker decides to:
 
@@ -61,6 +62,8 @@ Examples of what full-access mode can do if the worker decides to:
 - leave the worktree broken or half-edited if a run fails midway
 
 If you care about safety, use a disposable clone, a throwaway branch, or a repo snapshot before testing full-access runs.
+
+You can also layer a bridge-side hard deny list on top of full-access mode. For example, `--deny-commands rm` blocks `rm` even when `policy_mode=off`. This is a guardrail, not a sandbox. A full-access worker could still delete files through other tools or code.
 
 ## MVP Scope
 
@@ -88,6 +91,7 @@ Policy mode is daemon-level and defaults to `warn`.
 npm run daemon -- --policy-mode warn
 npm run daemon -- --policy-mode off
 npm run daemon -- --policy-mode enforce
+npm run daemon -- --policy-mode off --deny-commands rm
 ```
 
 - `off`
@@ -97,12 +101,15 @@ npm run daemon -- --policy-mode enforce
 - `enforce`
   The bridge treats `allowed_commands[]` as a hard policy and blocks the round on out-of-policy commands.
 
+Separate from `policy_mode`, you can set daemon-level hard-denied command basenames. Those commands are blocked in every mode, including `off`.
+
 ## Full-Access Mode
 
 If you want CLI Codex to behave like a real local coding worker, use:
 
 ```bash
 npm run daemon -- --policy-mode off
+npm run daemon -- --policy-mode off --deny-commands rm
 ```
 
 In `off` mode:
@@ -110,6 +117,7 @@ In `off` mode:
 - Bridge-side command enforcement is disabled
 - The worker prompt explicitly treats `allowed_commands[]` as advisory instead of mandatory
 - You still get structured events, state snapshots, interrupt/finalize controls, and diff/test summaries
+- Any daemon-level hard-denied commands, such as `rm`, are still blocked
 
 This is the recommended mode for trusted local development when you want Codex to actually write code and run the commands it needs.
 
@@ -208,6 +216,7 @@ This separation means mixed output does not break the event stream.
 - The worker should not create commits, amend commits, or switch branches
 - The worker should stay inside the target repository and not depend on external bootstrap/session files
 - `allowed_commands[]` is always included in the task contract, but its enforcement depends on daemon `policy_mode`
+- `--deny-commands` is a daemon-level hard stop that applies even when `policy_mode=off`
 
 ## Validation
 
@@ -251,4 +260,5 @@ Use `policy_mode=off` only when the repository and environment are trusted.
 - Keep backups or a clean git remote before full-access runs
 - Avoid pointing `cwd` at directories that contain secrets or unrelated personal files
 - Do not assume the bridge will stop destructive commands for you in `off` mode
+- If you need one explicit red line, prefer `--deny-commands rm` over relying on prompt wording alone
 - If you need stronger safety, use `warn` or `enforce` instead of `off`

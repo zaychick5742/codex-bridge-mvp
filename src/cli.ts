@@ -21,6 +21,21 @@ function parsePolicyMode(rawValue: string): PolicyMode {
   throw new Error(`invalid policy mode: ${rawValue}`);
 }
 
+function parseCommandList(rawValue: string): string[] {
+  const values = rawValue
+    .split(',')
+    .map((value) => value.trim().toLowerCase())
+    .filter((value) => value.length > 0);
+
+  for (const value of values) {
+    if (!/^[a-z0-9._+-]+$/i.test(value)) {
+      throw new Error(`invalid command basename: ${value}`);
+    }
+  }
+
+  return [...new Set(values)];
+}
+
 async function main(): Promise<void> {
   const __filename = fileURLToPath(import.meta.url);
   const projectRoot = resolve(dirname(__filename), '..');
@@ -28,12 +43,25 @@ async function main(): Promise<void> {
   const host = parseOption('host', '127.0.0.1');
   const port = Number.parseInt(parseOption('port', '4545'), 10);
   const policyMode = parsePolicyMode(parseOption('policy-mode', process.env.BRIDGE_POLICY_MODE ?? 'warn'));
+  const hardDeniedCommands = parseCommandList(
+    parseOption('deny-commands', process.env.BRIDGE_DENY_COMMANDS ?? ''),
+  );
 
   if (command === 'daemon') {
-    const daemon = new BridgeDaemon({ root_dir: projectRoot, host, port, policy_mode: policyMode });
+    const daemon = new BridgeDaemon({
+      root_dir: projectRoot,
+      host,
+      port,
+      policy_mode: policyMode,
+      hard_denied_commands: hardDeniedCommands,
+    });
     await daemon.init();
     await daemon.listen();
-    process.stdout.write(`bridge daemon listening on http://${host}:${port} (policy_mode=${policyMode})\n`);
+    const denySummary =
+      hardDeniedCommands.length > 0 ? `, deny_commands=${hardDeniedCommands.join(',')}` : '';
+    process.stdout.write(
+      `bridge daemon listening on http://${host}:${port} (policy_mode=${policyMode}${denySummary})\n`,
+    );
 
     const shutdown = async () => {
       await daemon.close();

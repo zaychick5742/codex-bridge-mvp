@@ -61,6 +61,15 @@ interface JsonRequest {
   body: unknown;
 }
 
+function buildDeniedCommandShim(command: string): string {
+  return [
+    '#!/bin/sh',
+    `printf '%s\\n' "bridge blocked hard-denied command: ${command}" >&2`,
+    'exit 126',
+    '',
+  ].join('\n');
+}
+
 function isStartRequest(value: unknown): value is StartRequest {
   const candidate = value as Partial<StartRequest>;
   return (
@@ -112,22 +121,38 @@ export class BridgeDaemon {
 
   private readonly policy_mode: PolicyMode;
 
+  private readonly hard_denied_commands: string[];
+
+  private readonly hard_denied_command_set: Set<string>;
+
+  private readonly command_shim_dir: string;
+
   private readonly runs = new Map<string, LoadedRun>();
 
   private readonly active_processes = new Map<string, ActiveProcess>();
 
   private server: Server | null = null;
 
-  constructor(options: { root_dir: string; host: string; port: number; policy_mode: PolicyMode }) {
+  constructor(options: {
+    root_dir: string;
+    host: string;
+    port: number;
+    policy_mode: PolicyMode;
+    hard_denied_commands: string[];
+  }) {
     this.root_dir = options.root_dir;
     this.host = options.host;
     this.port = options.port;
     this.policy_mode = options.policy_mode;
+    this.hard_denied_commands = [...new Set(options.hard_denied_commands.map((value) => value.toLowerCase()))];
+    this.hard_denied_command_set = new Set(this.hard_denied_commands);
     this.state_root = join(this.root_dir, '.bridge-state');
+    this.command_shim_dir = join(this.root_dir, '.bridge-bin');
   }
 
   async init(): Promise<void> {
     await ensureDir(this.state_root);
+    await this.syncCommandShims();
     await this.loadExistingRuns();
   }
 
@@ -168,6 +193,31 @@ export class BridgeDaemon {
       });
       this.server = null;
     }
+  }
+
+  private async syncCommandShims(): Promise<void> {
+    await fs.rm(this.command_shim_dir, { recursive: true, force: true });
+    if (this.hard_denied_commands.length === 0) {
+      return;
+    }
+
+    await ensureDir(this.command_shim_dir);
+    for (const command of this.hard_denied_commands) {
+      const wrapperPath = join(this.command_shim_dir, command);
+      await writeText(wrapperPath, buildDeniedCommandShim(command));
+      await fs.chmod(wrapperPath, 0o755);
+    }
+  }
+
+  private buildWorkerEnv(): NodeJS.ProcessEnv {
+    const env = { ...process.env };
+    if (this.hard_denied_commands.length === 0) {
+      return env;
+    }
+
+    env.PATH =
+      env.PATH && env.PATH.length > 0 ? `${this.command_shim_dir}:${env.PATH}` : this.command_shim_dir;
+    return env;
   }
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -258,6 +308,7 @@ export class BridgeDaemon {
       }
 
       state.policy_mode = state.policy_mode ?? this.policy_mode;
+      state.hard_denied_commands = state.hard_denied_commands ?? [];
       for (const round of state.rounds) {
         round.policy_warnings = round.policy_warnings ?? [];
       }
@@ -357,6 +408,7 @@ export class BridgeDaemon {
       stall_count: 0,
       last_error: null,
       policy_mode: this.policy_mode,
+      hard_denied_commands: [...this.hard_denied_commands],
       finalized: false,
       finalized_at: null,
       thread_id: null,
@@ -376,9 +428,10 @@ export class BridgeDaemon {
       allowed_commands: spec.allowed_commands,
       stop_conditions: spec.stop_conditions,
       policy_mode: this.policy_mode,
+      hard_denied_commands: this.hard_denied_commands,
     });
 
-    await this.launchRound(run, buildInitialPrompt(spec, this.policy_mode));
+    await this.launchRound(run, buildInitialPrompt(spec, this.policy_mode, this.hard_denied_commands));
     return {
       run_id,
       query: this.queryRun(run_id),
@@ -395,7 +448,10 @@ export class BridgeDaemon {
       throw new Error(`run is not waiting: ${run.state.status}`);
     }
 
-    await this.launchRound(run, buildContinuationPrompt(run.spec, run.state, this.policy_mode));
+    await this.launchRound(
+      run,
+      buildContinuationPrompt(run.spec, run.state, this.policy_mode, this.hard_denied_commands),
+    );
     return {
       run_id: runId,
       query: this.queryRun(runId),
@@ -455,6 +511,7 @@ export class BridgeDaemon {
       stall_count: run.state.stall_count,
       last_error: run.state.last_error,
       policy_mode: run.state.policy_mode,
+      hard_denied_commands: run.state.hard_denied_commands,
     };
 
     await writeJson(join(run.dir, 'final.json'), finalPayload);
@@ -499,6 +556,8 @@ export class BridgeDaemon {
     run.state.status = 'running';
     run.state.judgement = 'working';
     run.state.round = roundNumber;
+    run.state.policy_mode = this.policy_mode;
+    run.state.hard_denied_commands = [...this.hard_denied_commands];
     run.state.active_round = roundNumber;
     run.state.summary = `Round ${roundNumber} is running.`;
     run.state.last_error = null;
@@ -509,6 +568,7 @@ export class BridgeDaemon {
       ['exec', '--json', '--full-auto', '--cd', run.spec.cwd, prompt],
       {
         cwd: this.root_dir,
+        env: this.buildWorkerEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     );
@@ -519,6 +579,7 @@ export class BridgeDaemon {
       pid: child.pid ?? null,
       cwd: run.spec.cwd,
       policy_mode: this.policy_mode,
+      hard_denied_commands: this.hard_denied_commands,
       argv: ['codex', 'exec', '--json', '--full-auto', '--cd', run.spec.cwd, '<prompt>'],
     });
 
@@ -722,6 +783,27 @@ export class BridgeDaemon {
 
     const annotated = annotateCommand(merged);
     active.command_records.set(item.id, annotated);
+
+    const denied = [...new Set(
+      annotated.extracted_commands.filter((value) => this.hard_denied_command_set.has(value.toLowerCase())),
+    )];
+    if (denied.length > 0 && !active.policy_violation) {
+      active.policy_violation = `hard-denied command(s): ${denied.join(', ')}`;
+      await this.appendEvent(run, roundNumber, 'policy.violation', {
+        mode: this.policy_mode,
+        command: annotated.command,
+        extracted: annotated.extracted_commands,
+        hard_deny: true,
+        denied,
+      });
+      run.state.status = 'blocked';
+      run.state.judgement = 'blocked';
+      run.state.last_error = `blocked_policy: ${active.policy_violation}`;
+      run.state.summary = `Hard-denied command detected in round ${roundNumber}.`;
+      await this.persistRun(run);
+      active.child.kill('SIGTERM');
+      return;
+    }
 
     if (this.policy_mode === 'off') {
       return;
